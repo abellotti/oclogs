@@ -7,6 +7,7 @@ import arrow
 import requests
 import crayons
 import click
+import time
 
 from threading import Thread
 
@@ -92,21 +93,27 @@ pods = {}
 
 
 def pod_status(api, headers, namespace):
-    ns_url = f"namespaces/{namespace}/" if namespace else ""
-    r = requests.get(f"{api}/watch/{ns_url}pods", headers=headers, stream=True)
+    while True:
+        try:
+            ns_url = f"namespaces/{namespace}/" if namespace else ""
+            r = requests.get(f"{api}/watch/{ns_url}pods", headers=headers, stream=True)
 
-    if r.status_code != 200:
-        print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
-        return
+            if r.status_code != 200:
+                print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
+                return
 
-    for l in r.iter_lines():
-        d = json.loads(l)
-        pod = Pod(d["object"])
+            for l in r.iter_lines():
+                d = json.loads(l)
+                pod = Pod(d["object"])
 
-        if pod != pods.get(pod.name):
-            print(pod)
+                if pod != pods.get(pod.name):
+                    print(pod)
 
-        pods[pod.name] = pod
+                pods[pod.name] = pod
+        except Exception:
+            logging.exception("Failed connection")
+        print("Reconnecting...")
+        time.sleep(1)
 
 
 @click.command()
@@ -127,15 +134,21 @@ def cli(token, api, namespace):
 
     Thread(target=pod_status, args=(API, headers, namespace)).start()
 
-    ns_url = f"namespaces/{namespace}/" if namespace else ""
-    r = requests.get(f"{API}/watch/{ns_url}events", headers=headers, stream=True)
+    while True:
+        try:
+            ns_url = f"namespaces/{namespace}/" if namespace else ""
+            r = requests.get(f"{API}/watch/{ns_url}events", headers=headers, stream=True)
 
-    if r.status_code != 200:
-        print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
-        return
+            if r.status_code != 200:
+                print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
+                return
 
-    start = arrow.now().shift(minutes=-1)
+            start = arrow.now().shift(minutes=-1)
 
-    for e in (Event.from_event_feed(l) for l in r.iter_lines()):
-        if e.last_seen > start:
-            print(e)
+            for e in (Event.from_event_feed(l) for l in r.iter_lines()):
+                if e.last_seen > start:
+                    print(e)
+        except Exception:
+            logging.exception("Failed connection")
+        print("Reconnecting...")
+        time.sleep(1)
