@@ -7,9 +7,8 @@ import arrow
 import requests
 import crayons
 import click
-import time
 
-from concurrent import futures
+from threading import Thread
 
 logging.basicConfig()
 
@@ -18,6 +17,31 @@ colors = [getattr(crayons, c) for c in ('red', 'green', 'blue', 'yellow', 'cyan'
 
 def colorit(name):
     return colors[sum(map(ord, name)) % len(colors)](name)
+
+
+class Pod(object):
+
+    def __init__(self, d):
+        self.data = d
+        md = d["metadata"]
+        self.namespace = md["namespace"]
+        self.name = md["name"]
+        self.status = d["status"]["phase"]
+        self.started = arrow.get(md["creationTimestamp"])
+
+    def __eq__(self, o):
+        return o is not None and \
+               o.namespace == self.namespace and \
+               o.name == self.name and \
+               o.status == self.status
+
+    def __repr__(self):
+        return "%s %s: [%s] %s" % (
+            self.started.format("YYYY-MM-DD HH:mm:ss"),
+            colorit(self.namespace),
+            self.status,
+            crayons.white(self.name)
+        )
 
 
 class Event(object):
@@ -64,10 +88,32 @@ class Event(object):
         )
 
 
+pods = {}
+
+
+def pod_status(api, headers, namespace):
+    ns_url = f"namespaces/{namespace}/" if namespace else ""
+    r = requests.get(f"{api}/watch/{ns_url}pods", headers=headers, stream=True)
+
+    if r.status_code != 200:
+        print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
+        return
+
+    for l in r.iter_lines():
+        d = json.loads(l)
+        pod = Pod(d["object"])
+
+        if pod != pods.get(pod.name):
+            print(pod)
+
+        pods[pod.name] = pod
+
+
 @click.command()
 @click.option("--token", default=os.path.expanduser("~/token"))
 @click.option("--api")
-def cli(token, api):
+@click.option("-n", "--namespace")
+def cli(token, api, namespace):
 
     API = f"https://{api}/api/v1"
 
@@ -78,40 +124,18 @@ def cli(token, api):
         "Authorization": f"Bearer {token}",
         "Accept": "application/json"
     }
-    session = requests.Session()
-    session.headers.update(headers)
-    pool = futures.ThreadPoolExecutor()
 
-    def poll_until(e, state="running"):
-        target_container = e.message.split(":")[1][2:]
-        for _ in range(50):
-            pod = session.get(f"{API}/namespaces/{e.namespace}/pods/{e.name}").json()
-            try:
-                if type(pod["status"]) == str:
-                    state_name = pod["status"]
-                    reason = None
-                else:
-                    status = [s for s in pod["status"]["containerStatuses"]
-                              if s["name"] == target_container][0]
-                    cstate = status["state"]
-                    state_name = list(cstate.keys())[0]
-                    reason = cstate[state_name].get("reason")
-                if state_name != state:
-                    msg = f'Container {crayons.white(target_container)} {crayons.red("killed")}'
-                    msg += f'with status {crayons.white(state_name)}.'
-                    if reason:
-                        msg += f' Reason: {reason}'
-                    print(msg)
-                    return
-            except Exception as exc:
-                logging.exception("error")
-            time.sleep(1)
+    Thread(target=pod_status, args=(API, headers, namespace)).start()
 
-    r = requests.get(f"{API}/watch/events", headers=headers, stream=True)
+    ns_url = f"namespaces/{namespace}/" if namespace else ""
+    r = requests.get(f"{API}/watch/{ns_url}events", headers=headers, stream=True)
+
+    if r.status_code != 200:
+        print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
+        return
+
     start = arrow.now().shift(minutes=-1)
 
     for e in (Event.from_event_feed(l) for l in r.iter_lines()):
         if e.last_seen > start:
             print(e)
-            if e.reason == "Killing":
-                pool.submit(poll_until, e)
