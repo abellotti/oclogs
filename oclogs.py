@@ -20,11 +20,46 @@ def colorit(name):
     return colors[sum(map(ord, name)) % len(colors)](name)
 
 
-class Pod(object):
+class Resource(object):
+
+    name = None
+    namespace = None
+    last_seen = None
 
     def __init__(self, d):
         self.data = d
-        md = d["metadata"]
+        self.metadata = d["metadata"]
+
+
+class Container(Resource):
+
+    def __init__(self, name, d):
+        """
+        Containers get passed the entire pod JSON and pluck its own data out
+        based on the name parameter.
+        """
+        super().__init__(d)
+        self.name = name
+        self.pluck_data()
+        self.namespace = d["metadata"]["namespace"]
+
+    def pluck_data(self):
+        for c in self.data["spec"]["containers"]:
+            if c["name"] == self.name:
+                self.spec = c
+                break
+
+        for c in self.data["status"]["containerStatuses"]:
+            if c["name"] == self.name:
+                self.status = c
+                break
+
+
+class Pod(Resource):
+
+    def __init__(self, d):
+        super().__init__(d)
+        md = self.metadata
         self.namespace = md["namespace"]
         self.name = md["name"]
         self.status = d["status"]["phase"]
@@ -45,7 +80,7 @@ class Pod(object):
         )
 
 
-class Event(object):
+class Event(Resource):
     """
     count: how many times has this event been seen
     first_seen: when was this event first seen
@@ -60,18 +95,13 @@ class Event(object):
     type: logging level, e.g. Warning, Normal, etc
     """
 
-    @classmethod
-    def from_event_feed(cls, line):
-        return cls(json.loads(line)["object"])
-
     def __init__(self, d):
-        self.data = d
+        super().__init__(d)
         self.count = d["count"]
         self.first_seen = arrow.get(d["firstTimestamp"])
         self.last_seen = arrow.get(d["lastTimestamp"])
         self.obj = d["involvedObject"]
         self.message = d["message"]
-        self.metadata = d["metadata"]
         self.reason = d["reason"]
         self.component = d["source"]["component"]
         self.node = d["source"]["host"] if self.component == "kubelet" else None
@@ -89,31 +119,78 @@ class Event(object):
         )
 
 
-pods = {}
+class Observer(object):
+
+    def observe(self, resource, feed):
+        pass
 
 
-def pod_status(api, headers, namespace):
-    while True:
-        try:
-            ns_url = f"namespaces/{namespace}/" if namespace else ""
-            r = requests.get(f"{api}/watch/{ns_url}pods", headers=headers, stream=True)
+class ConsoleObserver(Observer):
 
-            if r.status_code != 200:
-                print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
-                return
+    def __init__(self, since=arrow.now().shift(minutes=-1)):
+        self.since = since
 
-            for l in r.iter_lines():
-                d = json.loads(l)
-                pod = Pod(d["object"])
+    def observe(self, resource, feed):
+        if resource.last_seen:
+            if not self.since or resource.last_seen > self.since:
+                print(resource)
+        else:
+            print(resource)
 
-                if pod != pods.get(pod.name):
-                    print(pod)
 
-                pods[pod.name] = pod
-        except Exception:
-            logging.exception("Failed connection")
-        print("Reconnecting...")
-        time.sleep(1)
+class OpenshiftFeed(object):
+
+    resource = None
+    api_suffix = None
+
+    def __init__(self, api, headers, namespace, observers):
+        self.api = api
+        self.headers = headers
+        self.namespace = namespace
+        self.observers = observers
+        self.resources = {}
+
+    def fetch_loop(self):
+        while True:
+            try:
+                ns_url = f"namespaces/{self.namespace}/" if self.namespace else ""
+                r = requests.get(f"{self.api}/watch/{ns_url}{self.api_suffix}",
+                                 headers=self.headers,
+                                 stream=True)
+
+                if r.status_code != 200:
+                    print(f"Invalid status from server: %s\n%s" % (
+                        r.status_code,
+                        r.json()['message']
+                    ))
+                    return
+
+                for l in r.iter_lines():
+                    d = json.loads(l)
+                    resource = self.resource(d["object"])
+                    self.resources[resource.name] = resource
+                    for o in self.observers:
+                        o.observe(resource, self)
+            except Exception:
+                logging.exception("Failed connection")
+            print("Reconnecting...")
+            time.sleep(1)
+
+
+class PodFeed(OpenshiftFeed):
+
+    def __init__(self, api, headers, namespace, observers):
+        super().__init__(api, headers, namespace, observers)
+        self.resource = Pod
+        self.api_suffix = "pods"
+
+
+class EventFeed(OpenshiftFeed):
+
+    def __init__(self, api, headers, namespace, observers):
+        super().__init__(api, headers, namespace, observers)
+        self.resource = Event
+        self.api_suffix = "events"
 
 
 @click.command()
@@ -132,23 +209,8 @@ def cli(token, api, namespace):
         "Accept": "application/json"
     }
 
-    Thread(target=pod_status, args=(API, headers, namespace)).start()
+    observers = (ConsoleObserver(),)
 
-    while True:
-        try:
-            ns_url = f"namespaces/{namespace}/" if namespace else ""
-            r = requests.get(f"{API}/watch/{ns_url}events", headers=headers, stream=True)
-
-            if r.status_code != 200:
-                print(f"Invalid status from server: {r.status_code}\n{r.json()['message']}")
-                return
-
-            start = arrow.now().shift(minutes=-1)
-
-            for e in (Event.from_event_feed(l) for l in r.iter_lines()):
-                if e.last_seen > start:
-                    print(e)
-        except Exception:
-            logging.exception("Failed connection")
-        print("Reconnecting...")
-        time.sleep(1)
+    for cls in (PodFeed, EventFeed):
+        feed = cls(API, headers, namespace, observers)
+        Thread(target=feed.fetch_loop).start()
