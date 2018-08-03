@@ -171,7 +171,7 @@ class OOMObserver(Observer):
             if c.state == "terminated" and c.state_data.get("reason") == "OOMKilled":
                 killed = arrow.get(c.state_data.get("finishedAt"))
                 if killed > self.since:
-                    self.console(resource, c)
+                    self.console(resource, c, killed)
                     if self.slack:
                         self.send_slack(resource, c, killed)
 
