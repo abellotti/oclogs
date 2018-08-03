@@ -13,11 +13,12 @@ from threading import Thread
 
 logging.basicConfig()
 
-colors = [getattr(crayons, c) for c in ('red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white', 'black')]
+COLORS = [getattr(crayons, c) for c in ('red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white', 'black')]
+DATE_FORMAT = "YYYY-MM-DD HH:mm:ss"
 
 
 def colorit(name):
-    return colors[sum(map(ord, name)) % len(colors)](name)
+    return COLORS[sum(map(ord, name)) % len(COLORS)](name)
 
 
 class Resource(object):
@@ -42,6 +43,11 @@ class Container(Resource):
         self.name = name
         self.pluck_data()
         self.namespace = d["metadata"]["namespace"]
+        if self.status:
+            self.state = list(self.status["state"].keys())[0]
+            self.state_data = self.status["state"][self.state]
+        else:
+            self.state = self.state_data = None
 
     def pluck_data(self):
         for c in self.data["spec"]["containers"]:
@@ -49,10 +55,13 @@ class Container(Resource):
                 self.spec = c
                 break
 
-        for c in self.data["status"]["containerStatuses"]:
-            if c["name"] == self.name:
-                self.status = c
-                break
+        if "containerStatuses" in self.data["status"]:
+            for c in self.data["status"]["containerStatuses"]:
+                if c["name"] == self.name:
+                    self.status = c
+                    break
+        else:
+            self.status = None
 
 
 class Pod(Resource):
@@ -64,6 +73,11 @@ class Pod(Resource):
         self.name = md["name"]
         self.status = d["status"]["phase"]
         self.started = arrow.get(md["creationTimestamp"])
+        self.containers = list(self.populate_containers())
+
+    def populate_containers(self):
+        for name in (c["name"] for c in self.data["spec"]["containers"]):
+            yield Container(name, self.data)
 
     def __eq__(self, o):
         return o is not None and \
@@ -73,7 +87,7 @@ class Pod(Resource):
 
     def __repr__(self):
         return "%s %s: [%s] %s" % (
-            self.started.format("YYYY-MM-DD HH:mm:ss"),
+            self.started.format(DATE_FORMAT),
             colorit(self.namespace),
             self.status,
             crayons.white(self.name)
@@ -111,7 +125,7 @@ class Event(Resource):
 
     def __repr__(self):
         return "%s %s: [%s] on %s - %s" % (
-            self.last_seen.format("YYYY-MM-DD HH:mm:ss"),
+            self.last_seen.format(DATE_FORMAT),
             colorit(self.namespace),
             self.reason,
             crayons.white(f"{self.kind}/{self.name}"),
@@ -121,21 +135,36 @@ class Event(Resource):
 
 class Observer(object):
 
+    def __init__(self, since=arrow.now().shift(minutes=-1)):
+        self.since = since
+
     def observe(self, resource, feed):
         pass
 
 
 class ConsoleObserver(Observer):
 
-    def __init__(self, since=arrow.now().shift(minutes=-1)):
-        self.since = since
+    def observe(self, resource, feed):
+        if resource.last_seen is None or resource.last_seen > self.since:
+            print(resource)
+
+
+class OOMObserver(Observer):
 
     def observe(self, resource, feed):
-        if resource.last_seen:
-            if not self.since or resource.last_seen > self.since:
-                print(resource)
-        else:
-            print(resource)
+        if type(resource) == Pod:
+            for c in resource.containers:
+                if c.state == "terminated" and c.state_data.get("reason") == "OOMKilled":
+                    self.report(resource, c)
+
+    def report(self, p, c):
+        killed = arrow.get(c.state_data.get("finishedAt"))
+        if killed > self.since:
+            print(crayons.white("{:*^80}".format("OOM KILLED")))
+            print(f"Pod: {p.name}")
+            print(f"Container: {c.name}")
+            print(f"Killed: {killed.format(DATE_FORMAT)}")
+            print(crayons.white("*" * 80))
 
 
 class OpenshiftFeed(object):
@@ -209,7 +238,7 @@ def cli(token, api, namespace):
         "Accept": "application/json"
     }
 
-    observers = (ConsoleObserver(),)
+    observers = (ConsoleObserver(), OOMObserver())
 
     for cls in (PodFeed, EventFeed):
         feed = cls(API, headers, namespace, observers)
