@@ -11,6 +11,11 @@ import time
 
 from threading import Thread
 
+try:
+    from slackclient import SlackClient
+except Exception:
+    pass
+
 logging.basicConfig()
 
 COLORS = [getattr(crayons, c) for c in ('red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white', 'black')]
@@ -151,20 +156,40 @@ class ConsoleObserver(Observer):
 
 class OOMObserver(Observer):
 
-    def observe(self, resource, feed):
-        if type(resource) == Pod:
-            for c in resource.containers:
-                if c.state == "terminated" and c.state_data.get("reason") == "OOMKilled":
-                    self.report(resource, c)
+    def __init__(self, since=arrow.now().shift(minutes=-1)):
+        super().__init__(since)
+        try:
+            self.slack = Slack()
+        except Exception:
+            self.slack = None
 
-    def report(self, p, c):
-        killed = arrow.get(c.state_data.get("finishedAt"))
-        if killed > self.since:
-            print(crayons.white("{:*^80}".format("OOM KILLED")))
-            print(f"Pod: {p.name}")
-            print(f"Container: {c.name}")
-            print(f"Killed: {killed.format(DATE_FORMAT)}")
-            print(crayons.white("*" * 80))
+    def observe(self, resource, feed):
+        if type(resource) != Pod:
+            return
+
+        for c in resource.containers:
+            if c.state == "terminated" and c.state_data.get("reason") == "OOMKilled":
+                killed = arrow.get(c.state_data.get("finishedAt"))
+                if killed > self.since:
+                    self.console(resource, c)
+                    if self.slack:
+                        self.send_slack(resource, c, killed)
+
+    def send_slack(self, p, c, killed):
+        msg = "\n".join([
+            ":dead-docker: *POD OOM* :dead-docker:",
+            f"Namespace: {p.namespace}",
+            f"Pod: {p.name}",
+            f"Container: {c.name}"
+        ])
+        self.slack.send_message(msg)
+
+    def console(self, p, c, killed):
+        print(crayons.white("{:*^80}".format("OOM KILLED")))
+        print(f"Pod: {p.name}")
+        print(f"Container: {c.name}")
+        print(f"Killed: {killed.format(DATE_FORMAT)}")
+        print(crayons.white("*" * 80))
 
 
 class OpenshiftFeed(object):
@@ -220,6 +245,17 @@ class EventFeed(OpenshiftFeed):
         super().__init__(api, headers, namespace, observers)
         self.resource = Event
         self.api_suffix = "events"
+
+
+class Slack(object):
+
+    def __init__(self):
+        token = os.environ["SLACK_TOKEN"]
+        self.channel = os.environ["SLACK_CHANNEL"]
+        self.client = SlackClient(token)
+
+    def send_message(self, msg):
+        self.client.api_call("chat.postMessage", channel=self.channel, text=msg)
 
 
 @click.command()
