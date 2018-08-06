@@ -182,7 +182,7 @@ class SystemOOM(Observer):
             print(f"Killed: {resource.last_seen.format(DATE_FORMAT)}")
             print(crayons.white("*" * 80))
             msg = "\n".join([
-                ":siren: *POD OOM* :siren:",
+                ":rotating_light: *System OOM* :rotating_light:",
                 f"Node: {resource.node}",
             ])
             self.slack.send_message(msg)
@@ -197,7 +197,7 @@ class FailedPodKill(Observer):
             print(resource.message)
             print(crayons.white("*" * 80))
             msg = "\n".join([
-                ":super_saiyan: *POD OOM* :super_saiyan:",
+                ":super_saiyan: *Failed to kill pod* :super_saiyan:",
                 f"Namespace: {resource.namespace}",
                 f"Pod: {resource.name}",
                 resource.message
