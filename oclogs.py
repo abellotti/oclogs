@@ -322,7 +322,7 @@ def cli(token, api, namespace):
         "Accept": "application/json"
     }
 
-    observers = (ConsoleObserver(), OOMObserver())
+    observers = (Console(), PodOOM(), SystemOOM())
 
     for cls in (PodFeed, EventFeed):
         feed = cls(API, headers, namespace, observers)
