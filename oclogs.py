@@ -155,6 +155,37 @@ class ConsoleObserver(Observer):
             print(resource)
 
 
+class SystemOOM(Observer):
+
+    def observe(self, resource, feed):
+        if type(resource) == Event and resource.reason == "SystemOOM":
+            print(crayons.white("{:*^80}".format("SYSTEM OOM")))
+            print(f"Node: {resource.node}")
+            print(f"Killed: {resource.last_seen.format(DATE_FORMAT)}")
+            print(crayons.white("*" * 80))
+            msg = "\n".join([
+                ":siren: *POD OOM* :siren:",
+                f"Node: {resource.node}",
+            ])
+            self.slack.send_message(msg)
+
+
+class FailedPodKill(Observer):
+    def observe(self, resource, feed):
+        if type(resource) == Event and resource.reason == "FailedKillPod":
+            print(crayons.white("{:*^80}".format("Failed to kill pod")))
+            print(f"Pod: {resource.name}")
+            print(f"Killed: {resource.last_seen.format(DATE_FORMAT)}")
+            print(resource.message)
+            print(crayons.white("*" * 80))
+            msg = "\n".join([
+                ":super_saiyan: *POD OOM* :super_saiyan:",
+                f"Namespace: {resource.namespace}",
+                f"Pod: {resource.name}",
+                resource.message
+            ])
+            self.slack.send_message(msg)
+
 
 class PodOOM(Observer):
 
