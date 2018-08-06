@@ -8,6 +8,7 @@ import requests
 import crayons
 import click
 import time
+import random
 
 from threading import Thread
 
@@ -148,11 +149,28 @@ class Observer(object):
         pass
 
 
-class ConsoleObserver(Observer):
+class Console(Observer):
+
+    def __init__(self, since=arrow.now().shift(minutes=-1), slack=None):
+        super().__init__(since, slack)
+        self.seen_messages = {}
+
+    def clear_seen_messages(self):
+        hour_ago = arrow.now().shift(hours=-1)
+        for k, v in list(self.seen_messages.items()):
+            if v < hour_ago:
+                del self.seen_messages[k]
 
     def observe(self, resource, feed):
+        if random.randint(0, 100) == 1:
+            self.clear_seen_messages()
+        msg = repr(resource)
+        now = arrow.now()
+        if msg in self.seen_messages and self.seen_messages[msg] > now.shift(minutes=-1):
+            return
+        self.seen_messages[msg] = now
         if resource.last_seen is None or resource.last_seen > self.since:
-            print(resource)
+            print(msg)
 
 
 class SystemOOM(Observer):
