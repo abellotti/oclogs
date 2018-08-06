@@ -140,8 +140,9 @@ class Event(Resource):
 
 class Observer(object):
 
-    def __init__(self, since=arrow.now().shift(minutes=-1)):
+    def __init__(self, since=arrow.now().shift(minutes=-1), slack=None):
         self.since = since
+        self.slack = slack
 
     def observe(self, resource, feed):
         pass
@@ -154,14 +155,8 @@ class ConsoleObserver(Observer):
             print(resource)
 
 
-class OOMObserver(Observer):
 
-    def __init__(self, since=arrow.now().shift(minutes=-1)):
-        super().__init__(since)
-        try:
-            self.slack = Slack()
-        except Exception:
-            self.slack = None
+class PodOOM(Observer):
 
     def observe(self, resource, feed):
         if type(resource) != Pod:
