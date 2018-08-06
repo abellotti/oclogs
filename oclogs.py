@@ -259,6 +259,10 @@ class Slack(object):
 @click.option("-n", "--namespace")
 def cli(token, api, namespace):
 
+    if not api:
+        print("Please specify valid api hostname using --api")
+        return
+
     API = f"https://{api}/api/v1"
 
     with open(token) as fp:
