@@ -322,7 +322,12 @@ def cli(token, api, namespace):
         "Accept": "application/json"
     }
 
-    observers = (Console(), PodOOM(), SystemOOM())
+    try:
+        slack = Slack()
+    except Exception:
+        slack = None
+
+    observers = (Console(slack=slack), PodOOM(slack=slack), SystemOOM(slack=slack))
 
     for cls in (PodFeed, EventFeed):
         feed = cls(API, headers, namespace, observers)
