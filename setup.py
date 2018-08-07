@@ -12,6 +12,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        ocl=oclogs:cli
+        ocl=oclogs:main
     ''',
 )

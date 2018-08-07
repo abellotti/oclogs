@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import logging
 import os
@@ -318,7 +318,7 @@ def disable_color():
 @click.option("--api")
 @click.option("-n", "--namespace")
 @click.option("--color/--no-color", default=True)
-def cli(token, api, namespace, color):
+def main(token, api, namespace, color):
 
     if not api:
         print("Please specify valid api hostname using --api")
@@ -347,3 +347,7 @@ def cli(token, api, namespace, color):
     for cls in (PodFeed, EventFeed):
         feed = cls(API, headers, namespace, observers)
         Thread(target=feed.fetch_loop).start()
+
+
+if __name__ == "__main__":
+    main(auto_envvar_prefix="OCLOGS")
