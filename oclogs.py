@@ -19,7 +19,8 @@ except Exception:
 
 logging.basicConfig()
 
-COLORS = [getattr(crayons, c) for c in ('red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white', 'black')]
+COLOR_KEYS = ('red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'white', 'black')
+COLORS = [getattr(crayons, c) for c in COLOR_KEYS]
 DATE_FORMAT = "YYYY-MM-DD HH:mm:ss"
 
 
@@ -302,15 +303,29 @@ class Slack(object):
         self.client.api_call("chat.postMessage", channel=self.channel, text=msg)
 
 
+def disable_color():
+    global COLORS
+    global crayons
+    from collections import namedtuple
+
+    COLORS = [lambda *a, **k: a[0] for c in COLOR_KEYS]
+    crayons_tuple = namedtuple("crayons", COLOR_KEYS)
+    crayons = crayons_tuple(*COLORS)
+
+
 @click.command()
 @click.option("--token", default=os.path.expanduser("~/token"))
 @click.option("--api")
 @click.option("-n", "--namespace")
-def cli(token, api, namespace):
+@click.option("--color/--no-color", default=True)
+def cli(token, api, namespace, color):
 
     if not api:
         print("Please specify valid api hostname using --api")
         return
+
+    if not color:
+        disable_color()
 
     API = f"https://{api}/api/v1"
 

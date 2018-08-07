@@ -15,4 +15,3 @@ setup(
         ocl=oclogs:cli
     ''',
 )
-
