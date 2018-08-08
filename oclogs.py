@@ -218,8 +218,7 @@ class PodOOM(Observer):
                 killed = arrow.get(c.state_data.get("finishedAt"))
                 if killed > self.since:
                     self.console(resource, c, killed)
-                    if self.slack:
-                        self.send_slack(resource, c, killed)
+                    self.send_slack(resource, c, killed)
 
     def send_slack(self, p, c, killed):
         msg = "\n".join([
@@ -296,12 +295,16 @@ class EventFeed(OpenshiftFeed):
 class Slack(object):
 
     def __init__(self):
-        token = os.environ["SLACK_TOKEN"]
-        self.channel = os.environ["SLACK_CHANNEL"]
-        self.client = SlackClient(token)
+        try:
+            token = os.environ["SLACK_TOKEN"]
+            self.channel = os.environ["SLACK_CHANNEL"]
+            self.client = SlackClient(token)
+        except Exception:
+            self.client = self.channel = None
 
     def send_message(self, msg):
-        self.client.api_call("chat.postMessage", channel=self.channel, text=msg)
+        if self.client:
+            self.client.api_call("chat.postMessage", channel=self.channel, text=msg)
 
 
 def disable_color():
@@ -338,10 +341,7 @@ def main(token, api, namespace, color):
         "Accept": "application/json"
     }
 
-    try:
-        slack = Slack()
-    except Exception:
-        slack = None
+    slack = Slack()
 
     observers = (Console(slack=slack), PodOOM(slack=slack), SystemOOM(slack=slack), FailedPodKill(slack=slack))
 
