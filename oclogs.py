@@ -190,6 +190,7 @@ class SystemOOM(Observer):
 
 
 class FailedPodKill(Observer):
+
     def observe(self, resource, feed):
         if type(resource) == Event and resource.reason == "FailedKillPod":
             print(crayons.white("{:*^80}".format("Failed to kill pod")))
@@ -201,7 +202,7 @@ class FailedPodKill(Observer):
                 ":super_saiyan: *Failed to kill pod* :super_saiyan:",
                 f"Namespace: {resource.namespace}",
                 f"Pod: {resource.name}",
-                resource.message
+                "```%s```" % " ".join(resource.message.split("\n"))
             ])
             self.slack.send_message(msg)
 
@@ -342,7 +343,7 @@ def main(token, api, namespace, color):
     except Exception:
         slack = None
 
-    observers = (Console(slack=slack), PodOOM(slack=slack), SystemOOM(slack=slack))
+    observers = (Console(slack=slack), PodOOM(slack=slack), SystemOOM(slack=slack), FailedPodKill(slack=slack))
 
     for cls in (PodFeed, EventFeed):
         feed = cls(API, headers, namespace, observers)
