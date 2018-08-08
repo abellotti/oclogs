@@ -278,18 +278,14 @@ class OpenshiftFeed(object):
 
 class PodFeed(OpenshiftFeed):
 
-    def __init__(self, api, headers, namespace, observers):
-        super().__init__(api, headers, namespace, observers)
-        self.resource = Pod
-        self.api_suffix = "pods"
+    resource = Pod
+    api_suffix = "pods"
 
 
 class EventFeed(OpenshiftFeed):
 
-    def __init__(self, api, headers, namespace, observers):
-        super().__init__(api, headers, namespace, observers)
-        self.resource = Event
-        self.api_suffix = "events"
+    resource = Event
+    api_suffix = "events"
 
 
 class Slack(object):
