@@ -145,6 +145,18 @@ class Observer(object):
     def __init__(self, since=arrow.now().shift(minutes=-1), slack=None):
         self.since = since
         self.slack = slack
+        self.seen_messages = {}
+
+    def has_been_seen(self, msg_key, now):
+        return (msg_key in self.seen_messages and
+                self.seen_messages[msg_key] > self.since)
+
+    def clear_seen_messages(self):
+        if random.randint(0, 100) == 1:
+            hour_ago = arrow.now().shift(hours=-1)
+            for k, v in list(self.seen_messages.items()):
+                if v < hour_ago:
+                    del self.seen_messages[k]
 
     def observe(self, resource, feed):
         pass
@@ -152,24 +164,16 @@ class Observer(object):
 
 class Console(Observer):
 
-    def __init__(self, since=arrow.now().shift(minutes=-1), slack=None):
-        super().__init__(since, slack)
-        self.seen_messages = {}
-
-    def clear_seen_messages(self):
-        hour_ago = arrow.now().shift(hours=-1)
-        for k, v in list(self.seen_messages.items()):
-            if v < hour_ago:
-                del self.seen_messages[k]
-
     def observe(self, resource, feed):
-        if random.randint(0, 100) == 1:
-            self.clear_seen_messages()
+        self.clear_seen_messages()
         msg = repr(resource)
         now = arrow.now()
-        if msg in self.seen_messages and self.seen_messages[msg] > now.shift(minutes=-1):
+
+        if self.has_been_seen(msg, now):
             return
+
         self.seen_messages[msg] = now
+
         if resource.last_seen is None or resource.last_seen > self.since:
             print(msg)
 
@@ -177,7 +181,15 @@ class Console(Observer):
 class SystemOOM(Observer):
 
     def observe(self, resource, feed):
+        self.clear_seen_messages()
         if type(resource) == Event and resource.reason == "SystemOOM":
+            now = arrow.now()
+
+            if self.has_been_seen(resource.node, now) or resource.last_seen < self.since:
+                return
+
+            self.seen_messages[resource.node] = now
+
             print(crayons.white("{:*^80}".format("SYSTEM OOM")))
             print(f"Node: {resource.node}")
             print(f"Killed: {resource.last_seen.format(DATE_FORMAT)}")
@@ -192,18 +204,29 @@ class SystemOOM(Observer):
 class FailedPodKill(Observer):
 
     def observe(self, resource, feed):
+        self.clear_seen_messages()
         if type(resource) == Event and resource.reason == "FailedKillPod":
+            msg_key = resource.namespace + resource.name
+            now = arrow.now()
+
+            if self.has_been_seen(msg_key, now) or resource.last_seen < self.since:
+                return
+
+            self.seen_messages[msg_key] = now
+
             print(crayons.white("{:*^80}".format("Failed to kill pod")))
             print(f"Pod: {resource.name}")
             print(f"Killed: {resource.last_seen.format(DATE_FORMAT)}")
             print(resource.message)
             print(crayons.white("*" * 80))
+
             msg = "\n".join([
                 ":super_saiyan: *Failed to kill pod* :super_saiyan:",
                 f"Namespace: {resource.namespace}",
                 f"Pod: {resource.name}",
                 "```%s```" % " ".join(resource.message.split("\n"))
             ])
+
             self.slack.send_message(msg)
 
 
