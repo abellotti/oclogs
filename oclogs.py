@@ -242,20 +242,24 @@ class OpenshiftFeed(object):
     resource = None
     api_suffix = None
 
-    def __init__(self, api, headers, namespace, observers):
+    def __init__(self, api, headers, namespace, observers, ca_store):
         self.api = api
         self.headers = headers
         self.namespace = namespace
         self.observers = observers
+        self.ca_store = ca_store
         self.resources = {}
 
     def fetch_loop(self):
         while True:
             try:
                 ns_url = f"namespaces/{self.namespace}/" if self.namespace else ""
-                r = requests.get(f"{self.api}/watch/{ns_url}{self.api_suffix}",
-                                 headers=self.headers,
-                                 stream=True)
+
+                kwargs = {"headers": self.headers, "stream": True}
+                if self.ca_store:
+                    kwargs["verify"] = self.ca_store
+
+                r = requests.get(f"{self.api}/watch/{ns_url}{self.api_suffix}", **kwargs)
 
                 if r.status_code != 200:
                     print(f"Invalid status from server: %s\n%s" % (
@@ -318,7 +322,8 @@ def disable_color():
 @click.option("--api")
 @click.option("-n", "--namespace")
 @click.option("--color/--no-color", default=True)
-def main(token, api, namespace, color):
+@click.option("--ca-store")
+def main(token, api, namespace, color, ca_store):
 
     if not api:
         print("Please specify valid api hostname using --api")
@@ -342,7 +347,7 @@ def main(token, api, namespace, color):
     observers = (Console(slack=slack), PodOOM(slack=slack), SystemOOM(slack=slack), FailedPodKill(slack=slack))
 
     for cls in (PodFeed, EventFeed):
-        feed = cls(API, headers, namespace, observers)
+        feed = cls(API, headers, namespace, observers, ca_store)
         Thread(target=feed.fetch_loop).start()
 
 
