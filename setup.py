@@ -9,6 +9,7 @@ setup(
         'arrow',
         'requests',
         'crayons',
+        'slackclient'
     ],
     entry_points='''
         [console_scripts]
