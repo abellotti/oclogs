@@ -343,10 +343,11 @@ def disable_color():
 @click.command()
 @click.option("--token", default=os.path.expanduser("~/token"))
 @click.option("--api")
+@click.option("--api-token")
 @click.option("-n", "--namespace")
 @click.option("--color/--no-color", default=True)
 @click.option("--ca-store")
-def main(token, api, namespace, color, ca_store):
+def main(token, api, api_token, namespace, color, ca_store):
 
     if not api:
         print("Please specify valid api hostname using --api")
@@ -357,8 +358,11 @@ def main(token, api, namespace, color, ca_store):
 
     API = f"https://{api}/api/v1"
 
-    with open(token) as fp:
-        token = fp.read().strip()
+    if api_token:
+        token = api_token
+    else:
+        with open(token) as fp:
+            token = fp.read().strip()
 
     headers = {
         "Authorization": f"Bearer {token}",
